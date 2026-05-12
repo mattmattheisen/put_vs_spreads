@@ -113,8 +113,15 @@ def load_bs_simulation(
     except ImportError:
         raise ImportError("Run: pip install yfinance")
 
-    spy = yf.download(UNDERLYING, start=BACKTEST_START, end=BACKTEST_END, progress=False)
-    vix = yf.download("^VIX",     start=BACKTEST_START, end=BACKTEST_END, progress=False)
+    spy = yf.download(UNDERLYING, start=BACKTEST_START, end=BACKTEST_END,
+                      progress=False, auto_adjust=True)
+    vix = yf.download("^VIX",     start=BACKTEST_START, end=BACKTEST_END,
+                      progress=False, auto_adjust=True)
+
+    # yfinance >=0.2.40 returns MultiIndex columns — flatten
+    for _df in [spy, vix]:
+        if isinstance(_df.columns, pd.MultiIndex):
+            _df.columns = _df.columns.get_level_values(0)
 
     spy = spy["Close"].rename("spot")
     vix = vix["Close"].rename("vix")
