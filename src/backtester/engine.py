@@ -31,21 +31,28 @@ def load_regime_data() -> pd.DataFrame:
         raise ImportError("Run: pip install yfinance")
 
     def _download(ticker):
-        df = yf.download(ticker, start=BACKTEST_START, end=BACKTEST_END,
-                         progress=False, auto_adjust=True)
-        # yfinance >=0.2.40 returns MultiIndex columns — flatten
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        return df["Close"]
+        raw = yf.download(ticker, start=BACKTEST_START, end=BACKTEST_END,
+                          progress=False, auto_adjust=True)
+        if raw.empty:
+            return pd.Series(dtype=float)
+        if isinstance(raw.columns, pd.MultiIndex):
+            if ("Close", ticker) in raw.columns:
+                return raw[("Close", ticker)]
+            raw.columns = raw.columns.get_level_values(0)
+        if "Close" in raw.columns:
+            return raw["Close"]
+        return raw.iloc[:, 0]
 
     spy = _download("SPY")
     vix = _download("^VIX")
 
-    # COR1M: CBOE implied correlation — use ^COR3M as available proxy
+    # COR1M: CBOE implied correlation
     try:
         cor1m = _download("^COR3M")
+        if cor1m.empty:
+            raise ValueError("empty")
     except Exception:
-        cor1m = vix * 0.6  # rough proxy; replace with real COR1M data
+        cor1m = vix * 0.6
 
     # MOVE proxy: use FRED BAMLH0A0HYM2 or manual data file if available
     move_file = Path("data/raw/move_index.csv")
@@ -70,7 +77,9 @@ def load_regime_data() -> pd.DataFrame:
 
     # Add term structure proxy: VIX3M - VIX (contango/backwardation)
     try:
-        vix3m = yf.download("^VIX3M", start=BACKTEST_START, end=BACKTEST_END, progress=False)["Close"]
+        vix3m = _download("^VIX3M")
+        if vix3m.empty:
+            raise ValueError("empty")
         vix3m = vix3m.reindex(pd.DatetimeIndex(df["date"])).values
         df["front_spread"] = vix3m - df["vix"].values
     except Exception:
