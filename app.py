@@ -230,9 +230,11 @@ st.markdown(f"""
         <h1>Long Puts vs. Put Spreads</h1>
         <p>Regime-Conditioned Backtest &nbsp;·&nbsp; VIX &times; MOVE &times; COR1M Signal Framework</p>
     </div>
-    <div class="top-header-right">
-        put_vs_spreads<br>
-        {BACKTEST_START} &rarr; {BACKTEST_END}
+    <div class="top-header-right" style="display:flex; align-items:center; gap:14px;">
+        <div style="text-align:right;">
+            <div style="color:white; font-size:14px; font-weight:600; letter-spacing:0.02em;">Shomer Analytics</div>
+            <div style="color:rgba(255,255,255,0.55); font-size:11px; font-family:'Courier New',monospace; margin-top:2px;">put_vs_spreads &nbsp;·&nbsp; {BACKTEST_START} &rarr; {BACKTEST_END}</div>
+        </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
