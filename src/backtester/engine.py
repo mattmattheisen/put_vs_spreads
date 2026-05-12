@@ -30,14 +30,21 @@ def load_regime_data() -> pd.DataFrame:
     except ImportError:
         raise ImportError("Run: pip install yfinance")
 
-    spy = yf.download("SPY",  start=BACKTEST_START, end=BACKTEST_END, progress=False)["Close"]
-    vix = yf.download("^VIX", start=BACKTEST_START, end=BACKTEST_END, progress=False)["Close"]
+    def _download(ticker):
+        df = yf.download(ticker, start=BACKTEST_START, end=BACKTEST_END,
+                         progress=False, auto_adjust=True)
+        # yfinance >=0.2.40 returns MultiIndex columns — flatten
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df["Close"]
+
+    spy = _download("SPY")
+    vix = _download("^VIX")
 
     # COR1M: CBOE implied correlation — use ^COR3M as available proxy
     try:
-        cor1m = yf.download("^COR3M", start=BACKTEST_START, end=BACKTEST_END, progress=False)["Close"]
+        cor1m = _download("^COR3M")
     except Exception:
-        # Fallback: synthetic correlation proxy from VIX / realized vol ratio
         cor1m = vix * 0.6  # rough proxy; replace with real COR1M data
 
     # MOVE proxy: use FRED BAMLH0A0HYM2 or manual data file if available
