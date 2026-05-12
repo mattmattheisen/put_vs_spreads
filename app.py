@@ -7,7 +7,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 import sys, os
 
@@ -18,10 +17,10 @@ st.set_page_config(
     page_title="Put vs. Spreads — Regime Backtest",
     page_icon=None,
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# ── Fidelity palette ──────────────────────────────────────────────────────────
+# ── Palette ───────────────────────────────────────────────────────────────────
 FID_GREEN       = "#00843D"
 FID_GREEN_LIGHT = "#5BAD7F"
 FID_NAVY        = "#005EB8"
@@ -29,14 +28,14 @@ FID_CHARCOAL    = "#1A1A1A"
 FID_GRAY_DARK   = "#4A4A4A"
 FID_GRAY_MID    = "#767676"
 FID_GRAY_LIGHT  = "#F4F4F4"
-FID_RULE        = "#CCCCCC"
+FID_RULE        = "#DDDDDD"
 FID_WHITE       = "#FFFFFF"
 FID_AMBER       = "#B8860B"
 FID_RED         = "#C0392B"
 FID_RED_DARK    = "#8B0000"
 
-LP_COLOR  = FID_GREEN
-PS_COLOR  = FID_NAVY
+LP_COLOR = FID_GREEN
+PS_COLOR = FID_NAVY
 
 REGIME_COLORS = {
     "FULL DEPLOYMENT":    FID_GREEN,
@@ -51,364 +50,381 @@ REGIME_COLORS = {
     "UNKNOWN":            "#AAAAAA",
 }
 
-# ── Global CSS ────────────────────────────────────────────────────────────────
+# ── Default parameters (hardcoded — no sliders) ───────────────────────────────
+BACKTEST_START  = "2018-01-01"
+BACKTEST_END    = "2024-12-31"
+DTE             = 30
+LONG_STRIKE     = 0.95
+SHORT_STRIKE    = 0.90
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     html, body, [class*="css"] {{
         font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
-    }}
-
-    /* Sidebar */
-    [data-testid="stSidebar"] {{
-        background-color: {FID_CHARCOAL};
-        border-right: 1px solid #2A2A2A;
-    }}
-    [data-testid="stSidebar"] * {{
-        color: #E8E8E8 !important;
-    }}
-    [data-testid="stSidebar"] .stSelectbox label,
-    [data-testid="stSidebar"] .stSlider label {{
-        color: {FID_GRAY_MID} !important;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }}
-
-    /* Main background */
-    .main .block-container {{
         background-color: {FID_WHITE};
-        padding-top: 1.5rem;
-        max-width: 1400px;
     }}
 
-    /* Header bar */
-    .header-bar {{
+    /* Hide sidebar toggle and streamlit chrome */
+    [data-testid="collapsedControl"] {{ display: none; }}
+    #MainMenu, footer, header {{ visibility: hidden; }}
+    .stDeployButton {{ display: none; }}
+
+    /* Remove default padding */
+    .main .block-container {{
+        padding: 0 2rem 2rem 2rem;
+        max-width: 100%;
+    }}
+
+    /* Header */
+    .top-header {{
         background-color: {FID_GREEN};
-        padding: 16px 28px;
-        margin: -1.5rem -1rem 1.5rem -1rem;
+        padding: 18px 32px;
+        margin: 0 -2rem 2rem -2rem;
         display: flex;
         align-items: center;
         justify-content: space-between;
+        border-bottom: 3px solid #006830;
     }}
-    .header-title {{
+    .top-header-left h1 {{
         color: white;
-        font-size: 18px;
+        font-size: 20px;
         font-weight: 600;
-        letter-spacing: -0.01em;
         margin: 0;
+        letter-spacing: -0.02em;
     }}
-    .header-sub {{
-        color: rgba(255,255,255,0.75);
+    .top-header-left p {{
+        color: rgba(255,255,255,0.72);
         font-size: 12px;
-        margin: 0;
-        margin-top: 2px;
+        margin: 3px 0 0 0;
+        letter-spacing: 0.01em;
+    }}
+    .top-header-right {{
+        text-align: right;
+        color: rgba(255,255,255,0.55);
+        font-size: 11px;
+        font-family: 'Courier New', monospace;
     }}
 
-    /* Metric cards */
-    .metric-card {{
+    /* Param strip */
+    .param-strip {{
         background: {FID_GRAY_LIGHT};
         border: 1px solid {FID_RULE};
-        border-top: 3px solid {FID_GREEN};
         border-radius: 4px;
-        padding: 16px 20px;
-        height: 100%;
+        padding: 12px 24px;
+        margin-bottom: 24px;
+        display: flex;
+        gap: 40px;
+        align-items: center;
     }}
-    .metric-card.navy {{
-        border-top-color: {FID_NAVY};
+    .param-item {{
+        display: flex;
+        flex-direction: column;
     }}
-    .metric-label {{
-        font-size: 11px;
+    .param-label {{
+        font-size: 10px;
         color: {FID_GRAY_MID};
         text-transform: uppercase;
-        letter-spacing: 0.06em;
-        margin-bottom: 6px;
+        letter-spacing: 0.07em;
+        margin-bottom: 2px;
     }}
-    .metric-value {{
-        font-size: 26px;
+    .param-value {{
+        font-size: 14px;
         font-weight: 600;
+        color: {FID_CHARCOAL};
+    }}
+
+    /* KPI cards */
+    .kpi-row {{
+        display: flex;
+        gap: 16px;
+        margin-bottom: 28px;
+    }}
+    .kpi-card {{
+        flex: 1;
+        background: {FID_WHITE};
+        border: 1px solid {FID_RULE};
+        border-top: 3px solid {FID_GREEN};
+        border-radius: 3px;
+        padding: 18px 20px;
+    }}
+    .kpi-card.navy {{ border-top-color: {FID_NAVY}; }}
+    .kpi-card.amber {{ border-top-color: {FID_AMBER}; }}
+    .kpi-label {{
+        font-size: 10px;
+        color: {FID_GRAY_MID};
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        margin-bottom: 8px;
+    }}
+    .kpi-value {{
+        font-size: 28px;
+        font-weight: 700;
         color: {FID_CHARCOAL};
         line-height: 1;
+        letter-spacing: -0.02em;
     }}
-    .metric-delta {{
-        font-size: 12px;
+    .kpi-sub {{
+        font-size: 11px;
         color: {FID_GRAY_MID};
-        margin-top: 4px;
+        margin-top: 5px;
     }}
-    .metric-delta.positive {{ color: {FID_GREEN}; }}
-    .metric-delta.negative {{ color: {FID_RED}; }}
+    .kpi-sub.green {{ color: {FID_GREEN}; font-weight: 500; }}
+    .kpi-sub.navy  {{ color: {FID_NAVY};  font-weight: 500; }}
 
-    /* Section headers */
-    .section-header {{
-        font-size: 13px;
-        font-weight: 600;
-        color: {FID_CHARCOAL};
+    /* Section labels */
+    .section-label {{
+        font-size: 11px;
+        font-weight: 700;
+        color: {FID_GRAY_MID};
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        border-bottom: 2px solid {FID_GREEN};
-        padding-bottom: 6px;
+        letter-spacing: 0.10em;
+        border-bottom: 1px solid {FID_RULE};
+        padding-bottom: 8px;
         margin-bottom: 16px;
-        margin-top: 8px;
+        margin-top: 4px;
     }}
 
     /* Divider */
-    hr {{
+    .divider {{
         border: none;
         border-top: 1px solid {FID_RULE};
-        margin: 1.5rem 0;
+        margin: 28px 0;
     }}
-
-    /* Hide streamlit chrome */
-    #MainMenu, footer, header {{ visibility: hidden; }}
-    .stDeployButton {{ display: none; }}
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── Data loading ──────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner="Loading market data...")
-def load_data(start, end, dte, long_strike, short_strike):
-    try:
-        from src.backtester.engine import load_regime_data, run_backtest, trades_to_df
-        from src.backtester.metrics import compute_metrics, compare_by_regime
-
-        # Temporarily override config
-        import config as cfg
-        cfg.BACKTEST_START   = start
-        cfg.BACKTEST_END     = end
-        cfg.DTE_TARGET       = dte
-        cfg.PUT_STRIKE_PCT   = long_strike
-        cfg.SHORT_STRIKE_PCT = short_strike
-
-        regime_df = load_regime_data()
-        lp_trades, ps_trades = run_backtest(regime_df)
-        lp_df = trades_to_df(lp_trades)
-        ps_df = trades_to_df(ps_trades)
-
-        return regime_df, lp_df, ps_df, None
-    except Exception as e:
-        return None, None, None, str(e)
-
-
-def metric_card(label, value, delta=None, positive_good=True, navy=False):
-    card_class = "metric-card navy" if navy else "metric-card"
-    delta_html = ""
-    if delta is not None:
-        delta_class = "positive" if (positive_good and "+" in str(delta)) or \
-                                    (not positive_good and "-" in str(delta)) else "negative"
-        delta_html = f'<div class="metric-delta {delta_class}">{delta}</div>'
-    return f"""
-    <div class="{card_class}">
-        <div class="metric-label">{label}</div>
-        <div class="metric-value">{value}</div>
-        {delta_html}
-    </div>
-    """
-
-
-def plotly_layout(title="", height=400):
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def plotly_base(title="", height=400):
     return dict(
-        title=dict(text=title, font=dict(size=13, color=FID_CHARCOAL, family="Inter"), x=0, xanchor="left"),
+        title=dict(text=title, font=dict(size=12, color=FID_CHARCOAL, family="Inter"),
+                   x=0, xanchor="left", y=0.97),
         height=height,
         paper_bgcolor=FID_WHITE,
         plot_bgcolor=FID_WHITE,
         font=dict(family="Inter", color=FID_CHARCOAL, size=11),
-        xaxis=dict(showgrid=False, linecolor=FID_RULE, tickcolor=FID_RULE),
-        yaxis=dict(gridcolor=FID_GRAY_LIGHT, linecolor=FID_RULE, tickcolor=FID_RULE),
+        xaxis=dict(showgrid=False, linecolor=FID_RULE, tickcolor=FID_RULE, zeroline=False),
+        yaxis=dict(gridcolor=FID_GRAY_LIGHT, linecolor=FID_RULE, tickcolor=FID_RULE, zeroline=False),
         legend=dict(bgcolor=FID_WHITE, bordercolor=FID_RULE, borderwidth=1,
-                    font=dict(size=11)),
-        margin=dict(l=10, r=10, t=50, b=10),
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(l=8, r=8, t=48, b=8),
     )
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### Parameters")
-    st.markdown("---")
-
-    start_date = st.selectbox("Backtest Start", ["2018-01-01", "2019-01-01", "2020-01-01"], index=0)
-    end_date   = st.selectbox("Backtest End",   ["2024-12-31", "2023-12-31", "2022-12-31"], index=0)
-
-    st.markdown("---")
-    dte = st.slider("Days to Expiry (DTE)", 14, 60, 30, step=7)
-    long_strike  = st.slider("Long Put Strike (%)", 85, 100, 95) / 100
-    short_strike = st.slider("Short Put Strike (%)", 75, 95, 90) / 100
-
-    st.markdown("---")
-    st.markdown(f"""
-    <div style="font-size:11px; color:#767676; line-height:1.6;">
-        <div style="color:#5BAD7F; font-weight:600; margin-bottom:4px;">Data Mode</div>
-        Black-Scholes simulation using VIX as IV proxy.<br><br>
-        Switch to OptionMetrics in <code>config.py</code> for real fills.
-    </div>
-    """, unsafe_allow_html=True)
-
-    run = st.button("Run Backtest", use_container_width=True,
-                    type="primary")
+def kpi(label, value, sub="", accent="green"):
+    return f"""
+    <div class="kpi-card {'navy' if accent=='navy' else 'amber' if accent=='amber' else ''}">
+        <div class="kpi-label">{label}</div>
+        <div class="kpi-value">{value}</div>
+        <div class="kpi-sub {accent}">{sub}</div>
+    </div>"""
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
-<div class="header-bar">
-    <div>
-        <p class="header-title">Long Puts vs. Put Spreads</p>
-        <p class="header-sub">Regime-Conditioned Backtest &nbsp;·&nbsp; VIX × MOVE × COR1M Signal Framework</p>
+<div class="top-header">
+    <div class="top-header-left">
+        <h1>Long Puts vs. Put Spreads</h1>
+        <p>Regime-Conditioned Backtest &nbsp;·&nbsp; VIX &times; MOVE &times; COR1M Signal Framework</p>
     </div>
-    <div style="color:rgba(255,255,255,0.6); font-size:11px; text-align:right;">
-        put_vs_spreads
+    <div class="top-header-right">
+        put_vs_spreads<br>
+        {BACKTEST_START} &rarr; {BACKTEST_END}
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 
-# ── Run / load ────────────────────────────────────────────────────────────────
-if "regime_df" not in st.session_state or run:
-    with st.spinner("Running backtest..."):
-        regime_df, lp_df, ps_df, err = load_data(
-            start_date, end_date, dte, long_strike, short_strike
-        )
-    if err:
-        st.error(f"Error: {err}")
-        st.info("Make sure all dependencies are installed: `pip install -r requirements.txt`")
-        st.stop()
-    st.session_state.regime_df = regime_df
-    st.session_state.lp_df     = lp_df
-    st.session_state.ps_df     = ps_df
+# ── Load data ─────────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner="Running backtest...")
+def load_all():
+    from src.backtester.engine import load_regime_data, run_backtest, trades_to_df
+    import config as cfg
+    cfg.BACKTEST_START   = BACKTEST_START
+    cfg.BACKTEST_END     = BACKTEST_END
+    cfg.DTE_TARGET       = DTE
+    cfg.PUT_STRIKE_PCT   = LONG_STRIKE
+    cfg.SHORT_STRIKE_PCT = SHORT_STRIKE
 
-regime_df = st.session_state.regime_df
-lp_df     = st.session_state.lp_df
-ps_df     = st.session_state.ps_df
+    regime_df = load_regime_data()
+    lp_trades, ps_trades = run_backtest(regime_df)
+    lp_df = trades_to_df(lp_trades)
+    ps_df = trades_to_df(ps_trades)
+    return regime_df, lp_df, ps_df
 
+try:
+    regime_df, lp_df, ps_df = load_all()
+except Exception as e:
+    st.error(f"Backtest error: {e}")
+    st.stop()
+
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
 from src.backtester.metrics import compute_metrics, compare_by_regime
+
 lp_m = compute_metrics(lp_df, "Long Put")
 ps_m = compute_metrics(ps_df, "Put Spread")
-premium_savings = (lp_m["total_premium"] - ps_m["total_premium"]) / lp_m["total_premium"] if lp_m["total_premium"] > 0 else 0
-pnl_diff = lp_m["total_pnl"] - ps_m["total_pnl"]
+premium_savings = (
+    (lp_m["total_premium"] - ps_m["total_premium"]) / lp_m["total_premium"]
+    if lp_m.get("total_premium", 0) > 0 else 0
+)
+
+
+# ── Param strip ───────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="param-strip">
+    <div class="param-item">
+        <span class="param-label">Period</span>
+        <span class="param-value">{BACKTEST_START} &rarr; {BACKTEST_END}</span>
+    </div>
+    <div class="param-item">
+        <span class="param-label">Underlying</span>
+        <span class="param-value">SPY</span>
+    </div>
+    <div class="param-item">
+        <span class="param-label">DTE Target</span>
+        <span class="param-value">{DTE} days</span>
+    </div>
+    <div class="param-item">
+        <span class="param-label">Long Put Strike</span>
+        <span class="param-value">{LONG_STRIKE:.0%} of spot</span>
+    </div>
+    <div class="param-item">
+        <span class="param-label">Short Put Strike</span>
+        <span class="param-value">{SHORT_STRIKE:.0%} of spot</span>
+    </div>
+    <div class="param-item">
+        <span class="param-label">Data Mode</span>
+        <span class="param-value">Black-Scholes / VIX</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ── KPI Row ───────────────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Summary</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-label">Summary</div>', unsafe_allow_html=True)
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
-    st.markdown(metric_card("LP Total P&L",
+    st.markdown(kpi("LP Total P&L",
         f"${lp_m['total_pnl']:,.0f}",
-        f"+{lp_m['win_rate']:.0%} win rate"), unsafe_allow_html=True)
+        f"{lp_m['win_rate']:.0%} win rate"), unsafe_allow_html=True)
 with c2:
-    st.markdown(metric_card("PS Total P&L",
+    st.markdown(kpi("PS Total P&L",
         f"${ps_m['total_pnl']:,.0f}",
-        f"+{ps_m['win_rate']:.0%} win rate", navy=True), unsafe_allow_html=True)
+        f"{ps_m['win_rate']:.0%} win rate", "navy"), unsafe_allow_html=True)
 with c3:
-    st.markdown(metric_card("LP Premium Paid",
+    st.markdown(kpi("LP Premium Paid",
         f"${lp_m['total_premium']:,.0f}",
-        "Total cost"), unsafe_allow_html=True)
+        f"Avg ${lp_m['avg_premium']:,.0f}/trade"), unsafe_allow_html=True)
 with c4:
-    st.markdown(metric_card("PS Premium Paid",
+    st.markdown(kpi("PS Premium Paid",
         f"${ps_m['total_premium']:,.0f}",
-        f"{premium_savings:.0%} cheaper than LP", navy=True), unsafe_allow_html=True)
+        f"{premium_savings:.0%} cheaper than LP", "navy"), unsafe_allow_html=True)
 with c5:
-    st.markdown(metric_card("LP Sharpe",
+    st.markdown(kpi("LP Sharpe",
         f"{lp_m['sharpe']:.2f}",
-        "Hedge leg only"), unsafe_allow_html=True)
+        "Hedge leg"), unsafe_allow_html=True)
 with c6:
-    st.markdown(metric_card("PS Sharpe",
+    st.markdown(kpi("PS Sharpe",
         f"{ps_m['sharpe']:.2f}",
-        "Hedge leg only", navy=True), unsafe_allow_html=True)
+        "Hedge leg", "navy"), unsafe_allow_html=True)
 
-st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 
 # ── Regime Timeline ───────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Regime Timeline</div>', unsafe_allow_html=True)
-
-fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
-                    row_heights=[0.4, 0.2, 0.2, 0.2],
-                    vertical_spacing=0.03)
+st.markdown('<div class="section-label">Regime Timeline</div>', unsafe_allow_html=True)
 
 dates = pd.to_datetime(regime_df["date"])
 
-# SPY with regime shading
+fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
+                    row_heights=[0.42, 0.19, 0.19, 0.19],
+                    vertical_spacing=0.025)
+
 fig.add_trace(go.Scatter(
     x=dates, y=regime_df["spot"],
-    line=dict(color=FID_CHARCOAL, width=1.2),
-    name="SPY", showlegend=True
+    line=dict(color=FID_CHARCOAL, width=1.3),
+    name="SPY"
 ), row=1, col=1)
 
 for regime, color in REGIME_COLORS.items():
     mask = regime_df["combined"] == regime
     if mask.any():
         fig.add_trace(go.Scatter(
-            x=dates, y=np.where(mask, regime_df["spot"], np.nan),
-            fill="tozeroy", fillcolor=color + "22",
+            x=dates,
+            y=np.where(mask, regime_df["spot"].max() * 1.05, np.nan),
+            fill="tozeroy",
+            fillcolor=color + "1A",
             line=dict(color="rgba(0,0,0,0)", width=0),
             name=regime, showlegend=False,
         ), row=1, col=1)
 
 fig.add_trace(go.Scatter(x=dates, y=regime_df["vix"],
-    line=dict(color=FID_CHARCOAL, width=1), name="VIX", showlegend=False), row=2, col=1)
-fig.add_hline(y=25, line=dict(color=FID_GREEN, dash="dash", width=1), row=2, col=1)
-fig.add_hline(y=35, line=dict(color=FID_RED, dash="dash", width=1), row=2, col=1)
+    line=dict(color="#333333", width=0.9), name="VIX", showlegend=False), row=2, col=1)
+fig.add_hline(y=25, line=dict(color=FID_GREEN, dash="dot", width=1), row=2, col=1)
+fig.add_hline(y=35, line=dict(color=FID_RED,   dash="dot", width=1), row=2, col=1)
 
 fig.add_trace(go.Scatter(x=dates, y=regime_df["move"],
-    line=dict(color=FID_GRAY_DARK, width=1), name="MOVE", showlegend=False), row=3, col=1)
-fig.add_hline(y=90,  line=dict(color=FID_GREEN, dash="dash", width=1), row=3, col=1)
-fig.add_hline(y=120, line=dict(color=FID_RED, dash="dash", width=1), row=3, col=1)
+    line=dict(color="#555555", width=0.9), name="MOVE", showlegend=False), row=3, col=1)
+fig.add_hline(y=90,  line=dict(color=FID_GREEN, dash="dot", width=1), row=3, col=1)
+fig.add_hline(y=120, line=dict(color=FID_RED,   dash="dot", width=1), row=3, col=1)
 
 fig.add_trace(go.Scatter(x=dates, y=regime_df["cor1m"],
-    line=dict(color=FID_GRAY_MID, width=1), name="COR1M", showlegend=False), row=4, col=1)
-fig.add_hline(y=40, line=dict(color=FID_RED, dash="dash", width=1), row=4, col=1)
+    line=dict(color="#777777", width=0.9), name="COR1M", showlegend=False), row=4, col=1)
+fig.add_hline(y=40, line=dict(color=FID_RED, dash="dot", width=1), row=4, col=1)
 
-fig.update_layout(**plotly_layout(height=520))
-fig.update_yaxes(gridcolor=FID_GRAY_LIGHT, linecolor=FID_RULE)
+fig.update_layout(**plotly_base(height=500))
+for r, label in [(1,"SPY"),(2,"VIX"),(3,"MOVE"),(4,"COR1M")]:
+    fig.update_yaxes(title_text=label, title_font=dict(size=10), gridcolor=FID_GRAY_LIGHT,
+                     linecolor=FID_RULE, row=r, col=1)
 fig.update_xaxes(showgrid=False, linecolor=FID_RULE)
-fig.update_yaxes(title_text="SPY", row=1, col=1)
-fig.update_yaxes(title_text="VIX", row=2, col=1)
-fig.update_yaxes(title_text="MOVE", row=3, col=1)
-fig.update_yaxes(title_text="COR1M", row=4, col=1)
 
 st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 
 # ── Cumulative P&L ────────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Cumulative P&L</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-label">Cumulative P&L</div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 
 with col1:
     lp_cum = lp_df.set_index("close_date")["pnl"].sort_index().cumsum()
     ps_cum = ps_df.set_index("close_date")["pnl"].sort_index().cumsum()
-
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(x=pd.to_datetime(lp_cum.index), y=lp_cum.values,
-        line=dict(color=LP_COLOR, width=2), name="Long Put"))
+        line=dict(color=LP_COLOR, width=2), name="Long Put", fill="tozeroy",
+        fillcolor=LP_COLOR + "0D"))
     fig2.add_trace(go.Scatter(x=pd.to_datetime(ps_cum.index), y=ps_cum.values,
         line=dict(color=PS_COLOR, width=2), name="Put Spread"))
-    fig2.add_hline(y=0, line=dict(color=FID_RULE, width=1))
-    fig2.update_layout(**plotly_layout("Cumulative P&L (net of premium)", height=340))
+    fig2.add_hline(y=0, line=dict(color=FID_RULE, width=0.8))
+    fig2.update_layout(**plotly_base("Cumulative P&L — Net of Premium", height=320))
     fig2.update_yaxes(tickprefix="$", tickformat=",.0f")
     st.plotly_chart(fig2, use_container_width=True)
 
 with col2:
     lp_prem = lp_df.set_index("close_date")["premium_paid"].sort_index().cumsum()
     ps_prem = ps_df.set_index("close_date")["premium_paid"].sort_index().cumsum()
-
     fig3 = go.Figure()
     fig3.add_trace(go.Scatter(x=pd.to_datetime(lp_prem.index), y=lp_prem.values,
         line=dict(color=LP_COLOR, width=2), name="Long Put"))
     fig3.add_trace(go.Scatter(x=pd.to_datetime(ps_prem.index), y=ps_prem.values,
-        line=dict(color=PS_COLOR, width=2), name="Put Spread"))
-    fig3.update_layout(**plotly_layout("Cumulative Premium Paid", height=340))
+        line=dict(color=PS_COLOR, width=2), name="Put Spread", fill="tonexty",
+        fillcolor=PS_COLOR + "0D"))
+    fig3.update_layout(**plotly_base("Cumulative Premium Paid — Cost Drag", height=320))
     fig3.update_yaxes(tickprefix="$", tickformat=",.0f")
     st.plotly_chart(fig3, use_container_width=True)
 
-st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 
 # ── Regime Breakdown ──────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Performance by Regime</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-label">Performance by Regime</div>', unsafe_allow_html=True)
 
 regime_compare = compare_by_regime(lp_df, ps_df)
 regimes = regime_compare.index.tolist()
@@ -416,93 +432,85 @@ regimes = regime_compare.index.tolist()
 col1, col2 = st.columns(2)
 
 with col1:
-    lp_pnl = regime_compare.get("lp_avg_pnl", pd.Series(0, index=regimes)).fillna(0)
-    ps_pnl = regime_compare.get("ps_avg_pnl", pd.Series(0, index=regimes)).fillna(0)
-
+    lp_pnl = [float(v) for v in regime_compare.get("lp_avg_pnl", pd.Series(0, index=regimes)).fillna(0)]
+    ps_pnl = [float(v) for v in regime_compare.get("ps_avg_pnl", pd.Series(0, index=regimes)).fillna(0)]
     fig4 = go.Figure()
     fig4.add_trace(go.Bar(x=regimes, y=lp_pnl, name="Long Put",
-        marker_color=LP_COLOR, opacity=0.9))
+        marker_color=LP_COLOR, opacity=0.9, marker_line_width=0))
     fig4.add_trace(go.Bar(x=regimes, y=ps_pnl, name="Put Spread",
-        marker_color=PS_COLOR, opacity=0.9))
-    fig4.add_hline(y=0, line=dict(color=FID_RULE, width=1))
-    fig4.update_layout(**plotly_layout("Avg P&L per Trade by Regime", height=340),
-                       barmode="group")
+        marker_color=PS_COLOR, opacity=0.9, marker_line_width=0))
+    fig4.add_hline(y=0, line=dict(color=FID_RULE, width=0.8))
+    fig4.update_layout(**plotly_base("Avg P&L per Trade by Regime", height=320), barmode="group")
     fig4.update_yaxes(tickprefix="$", tickformat=",.0f")
-    fig4.update_xaxes(tickangle=-30)
+    fig4.update_xaxes(tickangle=-30, tickfont=dict(size=9))
     st.plotly_chart(fig4, use_container_width=True)
 
 with col2:
-    lp_rop = regime_compare.get("lp_avg_rop", pd.Series(0, index=regimes)).fillna(0) * 100
-    ps_rop = regime_compare.get("ps_avg_rop", pd.Series(0, index=regimes)).fillna(0) * 100
-
+    lp_rop = [float(v)*100 for v in regime_compare.get("lp_avg_rop", pd.Series(0, index=regimes)).fillna(0)]
+    ps_rop = [float(v)*100 for v in regime_compare.get("ps_avg_rop", pd.Series(0, index=regimes)).fillna(0)]
     fig5 = go.Figure()
     fig5.add_trace(go.Bar(x=regimes, y=lp_rop, name="Long Put",
-        marker_color=LP_COLOR, opacity=0.9))
+        marker_color=LP_COLOR, opacity=0.9, marker_line_width=0))
     fig5.add_trace(go.Bar(x=regimes, y=ps_rop, name="Put Spread",
-        marker_color=PS_COLOR, opacity=0.9))
-    fig5.add_hline(y=0, line=dict(color=FID_RULE, width=1))
-    fig5.update_layout(**plotly_layout("Return on Premium by Regime (%)", height=340),
-                       barmode="group")
+        marker_color=PS_COLOR, opacity=0.9, marker_line_width=0))
+    fig5.add_hline(y=0, line=dict(color=FID_RULE, width=0.8))
+    fig5.update_layout(**plotly_base("Return on Premium by Regime", height=320), barmode="group")
     fig5.update_yaxes(ticksuffix="%")
-    fig5.update_xaxes(tickangle=-30)
+    fig5.update_xaxes(tickangle=-30, tickfont=dict(size=9))
     st.plotly_chart(fig5, use_container_width=True)
 
-st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 
 # ── Cap Breach ────────────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Spread Cap Breach — When the Short Strike Binds</div>',
+st.markdown('<div class="section-label">Spread Cap Breach — When the Short Strike Binds</div>',
             unsafe_allow_html=True)
 
 ps_analysis = ps_df.copy()
 ps_analysis["spot_decline_pct"] = (
     (ps_analysis["open_spot"] - ps_analysis["close_spot"]) / ps_analysis["open_spot"]
 )
-threshold = 1 - short_strike
+threshold = 1 - SHORT_STRIKE
 ps_analysis["cap_hit"] = ps_analysis["spot_decline_pct"] > threshold
-
 cap_by_regime = ps_analysis.groupby("regime")["cap_hit"].agg(["sum","count","mean"])
 cap_by_regime.columns = ["cap_hits", "total_trades", "cap_hit_rate"]
-cap_rates = (cap_by_regime["cap_hit_rate"] * 100).tolist()
+cap_rates = [float(v)*100 for v in cap_by_regime["cap_hit_rate"]]
 cap_regimes = cap_by_regime.index.tolist()
-
 bar_colors = [FID_RED if r > 20 else FID_AMBER if r > 10 else FID_GREEN for r in cap_rates]
 
 fig6 = go.Figure()
 fig6.add_trace(go.Bar(
     x=cap_regimes, y=cap_rates,
-    marker_color=bar_colors, opacity=0.9,
+    marker_color=bar_colors, opacity=0.9, marker_line_width=0,
     text=[f"{r:.1f}%" for r in cap_rates],
     textposition="outside",
-    textfont=dict(size=11, color=FID_CHARCOAL),
+    textfont=dict(size=10, color=FID_CHARCOAL),
 ))
 fig6.update_layout(
-    **plotly_layout(f"Cap Breach Rate by Regime  (SPY decline > {threshold:.0%})", height=360),
+    **plotly_base(f"Cap Breach Rate by Regime — SPY Decline > {threshold:.0%}", height=340),
     showlegend=False
 )
 fig6.update_yaxes(ticksuffix="%")
-fig6.update_xaxes(tickangle=-30)
+fig6.update_xaxes(tickangle=-30, tickfont=dict(size=9))
 st.plotly_chart(fig6, use_container_width=True)
 
-st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 
-# ── Trade Table ───────────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Trade Log</div>', unsafe_allow_html=True)
+# ── Trade Log ─────────────────────────────────────────────────────────────────
+st.markdown('<div class="section-label">Trade Log</div>', unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["Long Put", "Put Spread"])
-
-display_cols = ["open_date", "close_date", "regime", "open_spot",
-                "close_spot", "premium_paid", "pnl", "close_reason"]
+display_cols = ["open_date","close_date","regime","open_spot","close_spot","premium_paid","pnl","close_reason"]
 
 with tab1:
     show = lp_df[[c for c in display_cols if c in lp_df.columns]].copy()
-    show["pnl"] = show["pnl"].map("${:,.0f}".format)
+    show["pnl"]          = show["pnl"].map("${:,.0f}".format)
     show["premium_paid"] = show["premium_paid"].map("${:,.0f}".format)
-    st.dataframe(show, use_container_width=True, height=280)
+    st.dataframe(show, use_container_width=True, height=260)
 
 with tab2:
     show = ps_df[[c for c in display_cols if c in ps_df.columns]].copy()
-    show["pnl"] = show["pnl"].map("${:,.0f}".format)
+    show["pnl"]          = show["pnl"].map("${:,.0f}".format)
     show["premium_paid"] = show["premium_paid"].map("${:,.0f}".format)
-    st.dataframe(show, use_container_width=True, height=280)
+    st.dataframe(show, use_container_width=True, height=260)
