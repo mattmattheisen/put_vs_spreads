@@ -155,13 +155,22 @@ st.markdown(f"""
         border-top: 1px solid {FID_RULE};
         margin: 28px 0;
     }}
-    /* Style the control row */
     .stSelectbox > div > div {{
         border-color: {FID_RULE} !important;
         border-radius: 3px !important;
         font-size: 13px !important;
     }}
     .stSlider .st-emotion-cache-ue6h4q {{ color: {FID_GREEN}; }}
+    .no-trades-warning {{
+        background: {FID_GRAY_LIGHT};
+        border: 1px solid {FID_RULE};
+        border-left: 3px solid {FID_AMBER};
+        border-radius: 3px;
+        padding: 12px 16px;
+        font-size: 13px;
+        color: {FID_GRAY_DARK};
+        margin: 8px 0;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -193,6 +202,10 @@ def hex_to_rgba(hex_color, alpha=0.08):
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
     return f"rgba({r},{g},{b},{alpha})"
+
+def has_trades(df: pd.DataFrame) -> bool:
+    """Return True only if the DataFrame has rows and the required columns."""
+    return df is not None and not df.empty and "close_date" in df.columns and "pnl" in df.columns
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
@@ -235,8 +248,12 @@ with c6:
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 # ── Load data ─────────────────────────────────────────────────────────────────
+# CACHE VERSION: bump this string whenever engine/classifier/strategies change
+# so Render's @st.cache_data discards stale pre-fix results automatically.
+CACHE_VERSION = "v2-temporal-fix"
+
 @st.cache_data(show_spinner="Downloading market data and running backtest...")
-def load_all(start, end, dte_target, long_s, short_s):
+def load_all(start, end, dte_target, long_s, short_s, _cache_version=CACHE_VERSION):
     from src.backtester.engine import load_regime_data, run_backtest, trades_to_df
     import config as cfg
     cfg.BACKTEST_START   = start
@@ -267,6 +284,35 @@ if "last_params" not in st.session_state or run or st.session_state.last_params 
 regime_df = st.session_state.regime_df
 lp_df     = st.session_state.lp_df
 ps_df     = st.session_state.ps_df
+
+# ── Guard: no trades produced ─────────────────────────────────────────────────
+if not has_trades(lp_df) or not has_trades(ps_df):
+    st.markdown(f"""
+    <div class="no-trades-warning">
+        <strong>No trades generated</strong> for the selected date range and parameters.
+        The regime signal may not have turned defensive during this period, or the
+        backtest produced an empty result. Try a wider date range (e.g. 2018–2024)
+        or click <strong>Run Backtest</strong> to refresh.
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Still render the regime timeline so the signal context is visible
+    st.markdown('<div class="section-label">Regime Timeline</div>', unsafe_allow_html=True)
+    dates = pd.to_datetime(regime_df["date"])
+    fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
+                        row_heights=[0.44, 0.19, 0.19, 0.19],
+                        vertical_spacing=0.022)
+    fig.add_trace(go.Scatter(x=dates, y=regime_df["spot"],
+        line=dict(color=FID_CHARCOAL, width=1.3), name="SPY"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=regime_df["vix"],
+        line=dict(color="#333333", width=0.9), name="VIX", showlegend=False), row=2, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=regime_df["move"],
+        line=dict(color="#555555", width=0.9), name="MOVE", showlegend=False), row=3, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=regime_df["cor1m"],
+        line=dict(color="#777777", width=0.9), name="COR1M", showlegend=False), row=4, col=1)
+    fig.update_layout(**plotly_base(height=540))
+    st.plotly_chart(fig, use_container_width=True)
+    st.stop()
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
 from src.backtester.metrics import compute_metrics, compare_by_regime
@@ -474,9 +520,9 @@ threshold = 1 - short_strike_val
 ps_analysis["cap_hit"] = ps_analysis["spot_decline_pct"] > threshold
 cap_by_regime = ps_analysis.groupby("regime")["cap_hit"].agg(["sum","count","mean"])
 cap_by_regime.columns = ["cap_hits", "total_trades", "cap_hit_rate"]
-cap_rates  = [float(v)*100 for v in cap_by_regime["cap_hit_rate"]]
+cap_rates   = [float(v)*100 for v in cap_by_regime["cap_hit_rate"]]
 cap_regimes = cap_by_regime.index.tolist()
-bar_colors = [FID_RED if r > 20 else FID_AMBER if r > 10 else FID_GREEN for r in cap_rates]
+bar_colors  = [FID_RED if r > 20 else FID_AMBER if r > 10 else FID_GREEN for r in cap_rates]
 
 fig6 = go.Figure()
 fig6.add_trace(go.Bar(
@@ -500,7 +546,7 @@ st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 st.markdown('<div class="section-label">Trade Log</div>', unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["Long Put", "Put Spread"])
-display_cols = ["open_date","close_date","regime","open_spot","close_spot",
+display_cols = ["open_date","close_date","regime","signal_spot","open_spot","close_spot",
                 "premium_paid","pnl","close_reason"]
 
 with tab1:
